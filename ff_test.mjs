@@ -137,6 +137,10 @@ const result = await page.evaluate(async (years) => {
         poweredZones: c.poweredZoneCount, unpoweredZones: c.unpoweredZoneCount,
         coal: c.coalPowerPop, nuclear: c.nuclearPowerPop,
         crime: c.crimeAverage, traffic: c.trafficAverage,
+        landValueAverage: c.landValueAverage,
+        cityCentreX: game.gameMap.cityCentreX,
+        cityCentreY: game.gameMap.cityCentreY,
+        resZoneCount: c.resZonePop, comZoneCount: c.comZonePop, indZoneCount: c.indZonePop,
       });
     }
   }
