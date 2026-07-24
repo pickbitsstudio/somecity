@@ -152,6 +152,40 @@ AIAdvisor.prototype.findStarterLocation = function() {
 };
 
 
+// Fallback for a SECOND (or third, ...) hub once findStarterLocation's full 15x15
+// pristine-area requirement can't be satisfied anymore. Tried a much smaller 7x10
+// footprint here, but empirically (seed 42, probing with _isAreaClear at multiple
+// sizes after ~500 zones exist) even a 5x5 block can't be found ANYWHERE on the
+// map via a full-map ring search — the remaining ~6000 nominally "open" tiles
+// (dirt + bulldozable) are fragmented into pieces smaller than a single zone
+// footprint, not big contiguous tracts. So this basically never succeeds once a
+// map is this developed; multi-hub is a structural dead end here, not a location-
+// search tuning problem. Capped to the same r<40 radius as findStarterLocation
+// (rather than scanning the whole map) so repeated failed attempts — which will
+// be the common case — stay cheap instead of burning an O(width*height^2) scan
+// every time the multi-hub trigger fires.
+AIAdvisor.prototype.findMiniHubLocation = function() {
+  var cx = this.map.cityCentreX;
+  var cy = this.map.cityCentreY;
+  var maxR = 40;
+
+  for (var r = 0; r < maxR; r++) {
+    for (var dy = -r; dy <= r; dy++) {
+      for (var dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        var gx = cx + dx;
+        var gy = cy + dy;
+        if (this._isAreaClear(gx - 3, gy - 3, 7, 10)) {
+          return { x: gx, y: gy };
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
+
 AIAdvisor.prototype._isGridAligned = function(x, y) {
   if (!this._plan.initialized) return false;
   var relX = x - this._plan.gridOriginX;
@@ -893,11 +927,28 @@ AIAdvisor.prototype.findGridExpansionRoads = function(zoneType) {
   // by even a single river tile was permanently unreachable for NEW zone building —
   // confirmed via a terrain census showing 40%+ of some maps sitting unused, split
   // off by water, while the AI's own connected territory had fully saturated.
+  // canBulldoze(tv) is a static numeric-range check that (per the tile-recognition
+  // bug documented on _isAreaClear) incorrectly matches standalone wire tiles
+  // (LVPOWER2..LVPOWER10, values 212-220 — wire laid over bare dirt rather than on
+  // a road). Without excluding conductive tiles here, findGridExpansionRoads kept
+  // recommending frontier stubs that ran straight over another zone's live power
+  // line: roadTool.doTool correctly refuses to build there (it won't sever power
+  // to a zone that depends on that wire), so _buildRoadWithWire failed on every
+  // tile in the stub — confirmed via instrumentation showing _expandGrid's few
+  // attempts failing 90%+ of the time with tileValue 212-220 at every rejected
+  // position, even though isBuildable() had called them all clear. _isAreaClear
+  // already guards against exactly this for zone placement; mirror it here rather
+  // than switching to tile.isBulldozable() (that swap caused a severe, hard-to-
+  // unwind cascading regression elsewhere when tried previously — see the
+  // _isAreaClear comment and memory/simcit_ai_helper_findings.md).
   var isBuildable = function(x, y) {
     if (x < 2 || y < 2 || x >= width - 2 || y >= height - 2) return false;
     var tv = map.getTileValue(x, y);
-    return tv === TileValues.DIRT || TileUtils.canBulldoze(tv) ||
-      (tv >= TileValues.WATER_LOW && tv <= TileValues.WATER_HIGH);
+    if (tv >= TileValues.WATER_LOW && tv <= TileValues.WATER_HIGH) return true;
+    if (tv === TileValues.DIRT || TileUtils.canBulldoze(tv)) {
+      return !map.getTile(x, y).isConductive();
+    }
+    return false;
   };
 
   var extendLine = function(fromX, fromY, dx, dy, length) {

@@ -48,6 +48,7 @@ function AIHelper(game) {
   this._actionCount = 0;
   this._lastAction = '';
   this._currentSpeed = this.simulation._speed;
+  this._ticksSinceWireSuccess = 0;
 
   this._initUI();
   this._startAdviceLoop();
@@ -208,6 +209,29 @@ AIHelper.prototype._makeBar = function(value) {
 // priority sort every tick and permanently starve out lower-priority but genuinely
 // actionable work (like wiring up already-disconnected zones).
 AIHelper.prototype._executeNextAction = function() {
+  // Fairness override: the general "road density" heuristic (totalZonePop*2 >
+  // roadTotal) is easy to keep satisfying forever — build one road, zone pop grows,
+  // the ratio dips again — so it can win the priority fallthrough on nearly every
+  // tick for hundreds of simulated years even while it mostly fails (it's still
+  // tried first every time), leaving wire_connect starved. Confirmed via a
+  // reproducible seeded test (FF_SEED=42): _buildWireConnection got called only 32
+  // times across 800 years, versus 10,000+ calls to the road-density action, and
+  // 59-78% of zones stayed permanently unpowered as a direct result. Priority
+  // tuning alone doesn't fix this reliably (see memory/aiAdvisor history for
+  // several attempts) because whichever action is easiest to satisfy keeps winning
+  // regardless of exact priority values. Guarantee wire_connect a forced turn
+  // periodically instead, independent of the priority sort.
+  this._ticksSinceWireSuccess++;
+  if (this._ticksSinceWireSuccess > 8 && this.simulation._census.unpoweredZoneCount > 0) {
+    this._ticksSinceWireSuccess = 0;
+    if (this._buildWireConnection()) {
+      this._actionCount++;
+      this._lastAction = 'Connecting power lines (priority sweep)';
+      $('#aiStatus').text('#' + this._actionCount + ': ' + this._lastAction);
+      return;
+    }
+  }
+
   var recs = this.advisor.analyze();
 
   for (var i = 0; i < recs.length; i++) {
@@ -263,6 +287,7 @@ AIHelper.prototype._executeNextAction = function() {
     }
 
     if (success) {
+      if (action.type === 'wire_connect') this._ticksSinceWireSuccess = 0;
       this._actionCount++;
       this._lastAction = description;
       $('#aiStatus').text('#' + this._actionCount + ': ' + description);
@@ -377,7 +402,15 @@ AIHelper.prototype._buildStarterCity = function() {
   if (budget.totalFunds < 4500) return false;
 
   var origin = this.advisor.findStarterLocation();
-  if (!origin) return false;
+  if (!origin) {
+    // Full 15x15 T-grid area doesn't exist anywhere on the map anymore (typical
+    // once the original hub has developed hundreds of zones) — fall back to a much
+    // smaller self-contained satellite instead of giving up on multi-hub expansion
+    // entirely and sitting on unspendable funds.
+    var miniOrigin = this.advisor.findMiniHubLocation();
+    if (!miniOrigin) return false;
+    return this._buildMiniHub(miniOrigin);
+  }
 
   var gx = origin.x;
   var gy = origin.y;
@@ -466,6 +499,69 @@ AIHelper.prototype._buildStarterCity = function() {
 
   // === Step 8: Optimal starting tax (7% = neutral in tax table) ===
   this.simulation.budget.setTax(7);
+
+  return true;
+};
+
+
+// Compact fallback for additional hubs once findStarterLocation's full 15x15 area
+// can't be found anywhere on the map (confirmed via seeded testing: once ~500
+// zones exist on a 120x100 map, a full 225-tile clear block essentially never
+// exists again, even with $500k+ of accumulated, otherwise-unspendable funds
+// sitting idle waiting for the multi-hub trigger to succeed). Same idea as
+// _buildStarterCity but stripped to a 7x10 footprint: 1 coal + a short road/wire
+// spine + 1R + 1I. No commercial slot — the zone-demand pass will add one
+// organically once this satellite has power and its own local demand.
+// Deliberately does NOT call initCityPlan: that sets the single shared grid
+// origin used by _isGridAligned for the whole map's expansion scoring, and
+// re-pointing it at this satellite would misalign scoring for the original hub's
+// still-ongoing organic expansion.
+AIHelper.prototype._buildMiniHub = function(origin) {
+  var budget = this.simulation.budget;
+  if (budget.totalFunds < 3800) return false;
+
+  var gx = origin.x;
+  var gy = origin.y;
+
+  // === Coal plant, south end ===
+  var coalTool = this.tools.coal;
+  coalTool.doTool(gx, gy + 4, this.blockMaps);
+  if (coalTool.result !== coalTool.TOOLRESULT_OK) {
+    coalTool.clear();
+    return false;
+  }
+  coalTool.modifyIfEnoughFunding(budget);
+  if (coalTool.result === coalTool.TOOLRESULT_NO_MONEY) return false;
+
+  // === Road + wire spine at y=gy ===
+  var rx, ry;
+  for (rx = gx - 3; rx <= gx + 3; rx++) {
+    this._buildRoadWithWire(rx, gy);
+  }
+
+  // === Branch south connecting the spine to the plant ===
+  for (ry = gy + 1; ry <= gy + 3; ry++) {
+    this._buildRoadWithWire(gx, ry);
+  }
+
+  // === 1 residential + 1 industrial, flanking north of the spine ===
+  var resTool = this.tools.residential;
+  resTool.doTool(gx - 2, gy - 2, this.blockMaps);
+  if (resTool.result === resTool.TOOLRESULT_OK) {
+    resTool.modifyIfEnoughFunding(budget);
+  } else {
+    resTool.clear();
+  }
+
+  if (budget.totalFunds >= 600) {
+    var indTool = this.tools.industrial;
+    indTool.doTool(gx + 2, gy - 2, this.blockMaps);
+    if (indTool.result === indTool.TOOLRESULT_OK) {
+      indTool.modifyIfEnoughFunding(budget);
+    } else {
+      indTool.clear();
+    }
+  }
 
   return true;
 };

@@ -190,6 +190,7 @@ const result = await page.evaluate(async (years) => {
     ticksSinceZoneGrowth: advisor._ticksSinceZoneGrowth,
     lastSeenZoneCount: advisor._lastSeenZoneCount,
     newStarterLocation: advisor.findStarterLocation(),
+    newMiniHubLocation: advisor.findMiniHubLocation(),
   };
 
   let policeAreaClearCount = 0, policeCandidateCount = 0;
