@@ -334,8 +334,13 @@ var simulate = function(simData) {
     case 6:
     case 7:
     case 8:
-      this._mapScanner.mapScan((this._phaseCycle - 1) * this._map.width / 8,
-                                this._phaseCycle * this._map.width / 8, simData);
+      // Math.floor is required, not cosmetic: mapScan uses these as loop bounds
+      // for direct array indexing (x + y*width), so a fractional value (e.g. any
+      // map width not divisible by 8, like the "Small" 60x50 preset: 60/8=7.5)
+      // produces non-integer tile-array indices, which read back undefined and
+      // crash inside Tile.setFrom on literally the first simulated tick.
+      this._mapScanner.mapScan(Math.floor((this._phaseCycle - 1) * this._map.width / 8),
+                                Math.floor(this._phaseCycle * this._map.width / 8), simData);
       break;
 
     case 9:
