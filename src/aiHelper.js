@@ -570,7 +570,6 @@ AIHelper.prototype._buildMiniHub = function(origin) {
 // ---- Zone building with power connectivity ----
 
 AIHelper.prototype._buildZone = function(toolName) {
-  var budget = this.simulation.budget;
   var tool = this.tools[toolName];
   if (!tool) return false;
 
@@ -587,14 +586,31 @@ AIHelper.prototype._buildZone = function(toolName) {
 
   if (!loc || loc.score < -100) return false;
 
-  tool.doTool(loc.x, loc.y, this.blockMaps);
+  return this._placeZoneAt(tool, loc.x, loc.y, size);
+};
+
+
+// Place a specific tool at a known-good, already-chosen location, skipping the
+// findBest*Location search — used when a caller already knows exactly where to
+// build (e.g. a BFS-discovered destination that findBestZoneLocation's own
+// separate scan wouldn't otherwise rediscover).
+AIHelper.prototype._buildZoneAt = function(toolName, x, y) {
+  var tool = this.tools[toolName];
+  if (!tool) return false;
+  return this._placeZoneAt(tool, x, y, this._getToolSize(toolName));
+};
+
+
+AIHelper.prototype._placeZoneAt = function(tool, x, y, size) {
+  var budget = this.simulation.budget;
+  tool.doTool(x, y, this.blockMaps);
   if (tool.result === tool.TOOLRESULT_OK) {
     tool.modifyIfEnoughFunding(budget);
     if (tool.result !== tool.TOOLRESULT_NO_MONEY) {
       // Ensure road access (builds road+wire for power too)
-      this._ensureRoadAccess(loc.x, loc.y, size);
+      this._ensureRoadAccess(x, y, size);
       // Wire any adjacent roads that aren't conductive
-      this._wireAdjacentRoads(loc.x, loc.y, size);
+      this._wireAdjacentRoads(x, y, size);
       return true;
     }
   }
@@ -660,17 +676,46 @@ AIHelper.prototype._buildWireConnection = function() {
 // Expand the grid to create new zone slots
 AIHelper.prototype._expandGrid = function(zoneType) {
   var roads = this.advisor.findGridExpansionRoads(zoneType);
-  if (!roads || roads.length === 0) return false;
+  var isBfsFallback = false;
+  if (!roads || roads.length === 0) {
+    // Straight-line stub search found nothing at all (as opposed to finding
+    // candidates that then fail to build) — try the BFS-based fallback, which
+    // can route around water shapes the straight-line search can't represent.
+    roads = this.advisor.findFrontierBfsPath();
+    if (!roads || roads.length === 0) return false;
+    isBfsFallback = true;
+  }
 
   var budget = this.simulation.budget;
   var success = false;
 
-  for (var i = 0; i < roads.length; i++) {
+  // The BFS fallback's last path entry IS the zone destination (the tile whose
+  // surrounding 3x3 was confirmed clear) — it must stay clear for the zone, not
+  // get paved over as another road tile. Everything before it is the connecting
+  // road/wire run.
+  var roadCount = isBfsFallback ? roads.length - 1 : roads.length;
+
+  for (var i = 0; i < roadCount; i++) {
     if (budget.totalFunds < 515) break;
     var pos = roads[i];
     if (this._buildRoadWithWire(pos.x, pos.y)) {
       success = true;
     }
+  }
+
+  // The BFS fallback's destination is picked by "clear 3x3" alone, with no
+  // requirement to land on findBestZoneLocation's separate step-2-aligned scan
+  // grid — confirmed by testing that without this, the road reaches new
+  // territory but zone count never grows, because the regular zone-scan simply
+  // never happens to check that exact tile. Build a zone directly at the
+  // known-good destination instead of hoping the regular scan rediscovers it.
+  if (isBfsFallback && success && roads.length > 0) {
+    var dest = roads[roads.length - 1];
+    var zoneOk = this._buildZoneAt(zoneType, dest.x, dest.y);
+    if (zoneOk) success = true;
+    this._bfsZoneDebug = {
+      dest: dest, zoneOk: zoneOk, tv: this.map.getTileValue(dest.x, dest.y)
+    };
   }
 
   return success;

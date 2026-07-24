@@ -222,6 +222,8 @@ const result = await page.evaluate(async (years) => {
   };
   advisor.findGridExpansionRoads('residential');
   const gridExpansionRejectDebug = advisor._findGridExpansionDebug;
+  advisor.findFrontierBfsPath();
+  const frontierBfsDebug = advisor._frontierBfsDebug;
 
   let policeAreaClearCount = 0, policeCandidateCount = 0;
   for (let y = 2; y < map.height - 2; y += 2) {
@@ -410,6 +412,7 @@ const result = await page.evaluate(async (years) => {
     landValueTerrainDiagnostic,
     gridExpansionDebug,
     gridExpansionRejectDebug,
+    frontierBfsDebug,
     multiHubDebug,
     valveDebug,
     buildAttemptDebug,

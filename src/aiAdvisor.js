@@ -1074,6 +1074,108 @@ AIAdvisor.prototype.findGridExpansionRoads = function(zoneType) {
 };
 
 
+// Fallback for when findGridExpansionRoads finds nothing at all (round eleven:
+// root-caused via direct instrumentation — on a coastline-heavy map, EVERY
+// direction from EVERY frontier road tile either dead-ends in water or fails
+// lateral clearance, because that search only ever tries 4 straight cardinal
+// lines. It structurally cannot represent an indirect, bent, or diagonal route
+// around an oddly-shaped body of water, even a short and easy one to bridge.
+// This does a real multi-source BFS from the ENTIRE existing road network
+// simultaneously (so it finds the closest reachable new land from anywhere in
+// the city, not just near one probed tile) to the nearest tile with genuine
+// room for a zone, over the same buildable/water tile set as the straight-line
+// search (water traversal relies on the same incremental one-tile-at-a-time
+// bridge mechanic, and the returned path is already in source-to-goal order,
+// i.e. build order, so — unlike the reconnection pathfinders — no reversal is
+// needed). Deliberately kept as a separate fallback rather than replacing
+// findGridExpansionRoads outright: that function's straight-line search and
+// scoring already work well in the common (non-coastline-locked) case, so
+// changing it risks the exact kind of regression rounds five and ten hit.
+AIAdvisor.prototype.findFrontierBfsPath = function() {
+  var map = this.map;
+  var width = map.width;
+  var height = map.height;
+  var self = this;
+
+  // Uses the tile's real isBulldozable() flag rather than TileUtils.canBulldoze's
+  // static numeric range — the range check misses some genuinely clearable tiles
+  // (the opposite direction of the standalone-wire bug documented on
+  // _isAreaClear/findGridExpansionRoads, where the range matches tiles it
+  // shouldn't). Safe to use the accurate flag here specifically: this is a brand
+  // new, isolated fallback function that nothing else depends on, unlike
+  // _isAreaClear/isOpenRoadOrWater where swapping this out previously caused a
+  // cascading regression (round five) by changing how often an EXISTING,
+  // already-load-bearing code path succeeded.
+  var isBuildable = function(x, y) {
+    if (x < 2 || y < 2 || x >= width - 2 || y >= height - 2) return false;
+    var tv = map.getTileValue(x, y);
+    if (tv >= TileValues.WATER_LOW && tv <= TileValues.WATER_HIGH) return true;
+    if (tv === TileValues.DIRT || map.getTile(x, y).isBulldozable()) {
+      return !map.getTile(x, y).isConductive();
+    }
+    return false;
+  };
+
+  var visited = {};
+  var queue = [];
+
+  for (var sy = 2; sy < height - 2; sy++) {
+    for (var sx = 2; sx < width - 2; sx++) {
+      if (TileUtils.isRoad(map.getTileValue(sx, sy))) {
+        visited[sx + ',' + sy] = true;
+        queue.push({ x: sx, y: sy, prev: null, isSource: true });
+      }
+    }
+  }
+
+  var dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  var maxNodes = width * height;
+
+  for (var head = 0; head < queue.length && head < maxNodes; head++) {
+    var node = queue[head];
+
+    for (var d = 0; d < dirs.length; d++) {
+      var nx = node.x + dirs[d][0];
+      var ny = node.y + dirs[d][1];
+      var key = nx + ',' + ny;
+      if (visited[key]) continue;
+      if (!isBuildable(nx, ny)) continue;
+      visited[key] = true;
+
+      var next = { x: nx, y: ny, prev: node, isSource: false };
+
+      // Goal: a clear 3x3 area — the actual minimum footprint a zone needs
+      // (same bar findBestZoneLocation itself uses). Tried requiring a bigger
+      // 5x5 buffer first (to rule out thin dead-end corridors the way the
+      // straight-line search's lateral-clearance check does), but measured
+      // directly on a stalled map: 17 reachable tiles satisfy 3x3, zero satisfy
+      // 5x5 — the reachable frontier here is genuinely tight, not falsely so,
+      // so the stricter bar was simply leaving real, usable land unclaimed.
+      // Also tried additionally requiring x,y both even (to land on
+      // findBestZoneLocation's step-2 scan grid) since the road alone reaching
+      // new territory didn't produce new zones — but that made a genuinely
+      // tight frontier nearly impossible to satisfy at all (back to the frozen
+      // baseline). Fixed properly instead in aiHelper.js: build a zone directly
+      // at this destination right after the connecting road, rather than
+      // relying on findBestZoneLocation's separate, differently-aligned scan to
+      // rediscover it later.
+      if (self._isAreaClear(nx - 1, ny - 1, 3)) {
+        var path = [];
+        for (var cur = next; cur && !cur.isSource; cur = cur.prev) {
+          path.unshift({ x: cur.x, y: cur.y });
+        }
+        return path;
+      }
+
+      queue.push(next);
+    }
+  }
+
+  this._frontierBfsDebug = { visitedCount: queue.length, mapTiles: width * height };
+  return null;
+};
+
+
 AIAdvisor.prototype.findBestLargeLocation = function(toolName) {
   var map = this.map;
   var bestScore = -Infinity;
