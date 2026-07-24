@@ -413,6 +413,7 @@ const result = await page.evaluate(async (years) => {
     gridExpansionDebug,
     gridExpansionRejectDebug,
     frontierBfsDebug,
+    bfsZoneDebug: helper._bfsZoneDebug,
     multiHubDebug,
     valveDebug,
     buildAttemptDebug,
