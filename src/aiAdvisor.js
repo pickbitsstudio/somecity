@@ -965,21 +965,27 @@ AIAdvisor.prototype.findGridExpansionRoads = function(zoneType) {
   var best = null;
   var bestScore = -Infinity;
 
+  var debug = this._findGridExpansionDebug = {
+    roadTiles: 0, tooShort: 0, endsInWater: 0, noLateralClearance: 0,
+    tooFarForJobs: 0, candidatesFound: 0
+  };
+
   for (var y = 2; y < height - 2; y++) {
     for (var x = 2; x < width - 2; x++) {
       if (!TileUtils.isRoad(map.getTileValue(x, y))) continue;
+      debug.roadTiles++;
 
       for (var d = 0; d < dirs.length; d++) {
         var dx = dirs[d][0];
         var dy = dirs[d][1];
         var stub = extendLine(x, y, dx, dy, STUB_LENGTH);
-        if (stub.length < 4) continue;
+        if (stub.length < 4) { debug.tooShort++; continue; }
 
         // If the stub is still over water at its far end, it's a bridge that
         // doesn't reach anywhere useful yet (no shore to build zones on within the
         // length budget) — skip it rather than spend the cost on a dead-end pier.
         var lastTv = map.getTileValue(stub[stub.length - 1].x, stub[stub.length - 1].y);
-        if (lastTv >= TileValues.WATER_LOW && lastTv <= TileValues.WATER_HIGH) continue;
+        if (lastTv >= TileValues.WATER_LOW && lastTv <= TileValues.WATER_HIGH) { debug.endsInWater++; continue; }
 
         // Require genuine lateral clearance at the midpoint, not just a 1-tile-wide
         // corridor: a thin gap between two existing buildings can easily satisfy "4
@@ -1001,6 +1007,7 @@ AIAdvisor.prototype.findGridExpansionRoads = function(zoneType) {
         // map once the city was reasonably built up, freezing expansion entirely.
         var mid = stub[Math.floor(stub.length / 2)];
         if (!isBuildable(mid.x + dy, mid.y + dx) && !isBuildable(mid.x - dy, mid.y - dx)) {
+          debug.noLateralClearance++;
           continue;
         }
 
@@ -1016,9 +1023,11 @@ AIAdvisor.prototype.findGridExpansionRoads = function(zoneType) {
           if (hasJobsAlready &&
               !this._hasNearbyCommercial(endPos.x, endPos.y, MAX_TRAFFIC_DISTANCE) &&
               !this._hasNearbyIndustrial(endPos.x, endPos.y, MAX_TRAFFIC_DISTANCE)) {
+            debug.tooFarForJobs++;
             continue;
           }
         }
+        debug.candidatesFound++;
 
         var score = 0;
         var endY = stub[stub.length - 1].y;

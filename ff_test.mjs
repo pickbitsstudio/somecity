@@ -220,6 +220,8 @@ const result = await page.evaluate(async (years) => {
     newStarterLocation: advisor.findStarterLocation(),
     newMiniHubLocation: advisor.findMiniHubLocation(),
   };
+  advisor.findGridExpansionRoads('residential');
+  const gridExpansionRejectDebug = advisor._findGridExpansionDebug;
 
   let policeAreaClearCount = 0, policeCandidateCount = 0;
   for (let y = 2; y < map.height - 2; y += 2) {
@@ -407,6 +409,7 @@ const result = await page.evaluate(async (years) => {
     terrainCensus,
     landValueTerrainDiagnostic,
     gridExpansionDebug,
+    gridExpansionRejectDebug,
     multiHubDebug,
     valveDebug,
     buildAttemptDebug,
