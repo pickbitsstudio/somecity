@@ -180,6 +180,30 @@ const result = await page.evaluate(async (years) => {
     }
   }
 
+  // One-off diagnostic: how much is the terrain-density (nearby-undeveloped-land)
+  // bonus actually contributing to land value in practice, vs. the distance-decay
+  // base? Sample every residential zone tile's landValueMap vs terrainDensityMap.
+  const landValueMap = sim.blockMaps.landValueMap;
+  const terrainDensityMap = sim.blockMaps.terrainDensityMap;
+  let lvSampleCount = 0, lvTotal = 0, terrainTotal = 0, terrainMax = 0;
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (map.getTile(x, y).isZone()) {
+        lvSampleCount++;
+        lvTotal += landValueMap.worldGet(x, y);
+        const td = terrainDensityMap.worldGet(x, y);
+        terrainTotal += td;
+        if (td > terrainMax) terrainMax = td;
+      }
+    }
+  }
+  const landValueTerrainDiagnostic = {
+    sampleCount: lvSampleCount,
+    avgLandValue: lvSampleCount ? +(lvTotal / lvSampleCount).toFixed(1) : null,
+    avgTerrainDensityBonus: lvSampleCount ? +(terrainTotal / lvSampleCount).toFixed(1) : null,
+    maxTerrainDensityBonus: terrainMax,
+  };
+
   const valveDebug = {
     resValve: sim._valves.resValve, comValve: sim._valves.comValve, indValve: sim._valves.indValve,
     employment: sim._census.resPop > 0 ? (sim._census.comPop + sim._census.indPop) / (sim._census.resPop / 8) : null,
@@ -381,6 +405,7 @@ const result = await page.evaluate(async (years) => {
     trueNetworkDiagnostic,
     placementDiagnostic,
     terrainCensus,
+    landValueTerrainDiagnostic,
     gridExpansionDebug,
     multiHubDebug,
     valveDebug,
