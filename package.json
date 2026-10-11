@@ -32,7 +32,7 @@
     "typescript": "5.8.3",
     "webpack": "5.100.1",
     "webpack-cli": "6.0.1",
-    "webpack-dev-server": "5.2.2"
+    "webpack-dev-server": "5.2.6"
   },
   "author": "Graeme McCutcheon (http://www.graememcc.co.uk)",
   "license": "GPL-3.0",
