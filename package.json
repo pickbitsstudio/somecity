@@ -4,10 +4,10 @@
   "description": "SimCit - A SimCity clone based on Micropolis, the open-source release of the original SimCity",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MrPickering/SimCit.git"
+    "url": "https://github.com/pickbitsstudio/SimCit.git"
   },
   "bugs": {
-    "url": "https://github.com/MrPickering/SimCit/issues"
+    "url": "https://github.com/pickbitsstudio/SimCit/issues"
   },
   "type": "module",
   "scripts": {
